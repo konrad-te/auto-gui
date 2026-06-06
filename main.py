@@ -20,7 +20,7 @@ class macro_app:
         # set up the window title, size, and background color
         self.root = root
         self.root.title("mouse macro")
-        self.root.geometry("420x405")
+        self.root.geometry("500x560")
         self.root.resizable(False, False)
         self.root.configure(bg="#f4f6f8")
 
@@ -34,6 +34,13 @@ class macro_app:
         self.last_move_position = None
         self.mouse_listener = None
         self.playback_speed = 1.0
+        self.auto_attack = False
+        self.stop_auto_attack = threading.Event()
+        self.auto_thread = None
+        self.battle_top_left = None
+        self.battle_bottom_right = None
+        self.attack_point = None
+        self.check_interval = 2.0
 
         # store text that the gui updates while the app runs
         self.status_text = tk.StringVar(value="idle")
@@ -41,6 +48,11 @@ class macro_app:
         self.file_text = tk.StringVar(value=str(recording_file))
         self.speed_text = tk.StringVar(value="1.00x")
         self.speed_value = tk.DoubleVar(value=1.0)
+        self.auto_text = tk.StringVar(value="auto reattack off")
+        self.region_text = tk.StringVar(value="battle area not set")
+        self.attack_text = tk.StringVar(value="attack point not set")
+        self.interval_text = tk.StringVar(value="2.0s")
+        self.interval_value = tk.DoubleVar(value=2.0)
 
         # build the window, start hotkeys, and handle closing the app
         self.build_gui()
@@ -65,9 +77,31 @@ class macro_app:
             fg="#111827",
         ).pack(anchor="w")
 
+        # create tab buttons for the two main tools
+        tabs = tk.Frame(frame, bg="#f4f6f8")
+        tabs.pack(fill="x", pady=(18, 14))
+
+        self.macro_tab_button = self.make_tab_button(tabs, "macro recorder", lambda: self.show_page("macro"))
+        self.auto_tab_button = self.make_tab_button(tabs, "auto reattack", lambda: self.show_page("auto"))
+        self.macro_tab_button.pack(side="left", expand=True, fill="x", padx=(0, 5))
+        self.auto_tab_button.pack(side="left", expand=True, fill="x", padx=(5, 0))
+
+        # create the page area and build both pages
+        self.page_area = tk.Frame(frame, bg="#f4f6f8")
+        self.page_area.pack(fill="both", expand=True)
+
+        self.macro_page = tk.Frame(self.page_area, bg="#f4f6f8")
+        self.auto_page = tk.Frame(self.page_area, bg="#f4f6f8")
+
+        self.build_macro_page(self.macro_page)
+        self.build_auto_page(self.auto_page)
+        self.show_page("macro")
+
+    # build the macro recording and playback page
+    def build_macro_page(self, parent):
         # create the row that shows current status and event count
-        status_row = tk.Frame(frame, bg="#f4f6f8")
-        status_row.pack(fill="x", pady=(16, 14))
+        status_row = tk.Frame(parent, bg="#f4f6f8")
+        status_row.pack(fill="x", pady=(0, 14))
 
         tk.Label(
             status_row,
@@ -89,16 +123,16 @@ class macro_app:
 
         # show which file the macro is saved to
         tk.Label(
-            frame,
+            parent,
             textvariable=self.file_text,
             font=("segoe ui", 9),
             bg="#f4f6f8",
             fg="#6b7280",
-        ).pack(anchor="w", pady=(0, 16))
+        ).pack(anchor="w", pady=(0, 18))
 
         # create the playback speed control
-        speed_box = tk.Frame(frame, bg="#f4f6f8")
-        speed_box.pack(fill="x", pady=(0, 14))
+        speed_box = tk.Frame(parent, bg="#f4f6f8")
+        speed_box.pack(fill="x", pady=(0, 18))
 
         speed_header = tk.Frame(speed_box, bg="#f4f6f8")
         speed_header.pack(fill="x")
@@ -135,7 +169,7 @@ class macro_app:
         ).pack(fill="x", pady=(4, 0))
 
         # create the button area
-        buttons = tk.Frame(frame, bg="#f4f6f8")
+        buttons = tk.Frame(parent, bg="#f4f6f8")
         buttons.pack(fill="x")
 
         # add the main control buttons
@@ -143,9 +177,9 @@ class macro_app:
         self.make_button(buttons, "play", "f9", self.play_recording, "#111827", "#030712")
         self.make_button(buttons, "stop", "f10", self.stop_all, "#dc2626", "#b91c1c")
 
-        # show a short hotkey reminder
+        # show macro hotkeys only on the macro page
         tk.Label(
-            frame,
+            parent,
             text="f8 records mouse movement and clicks\nf9 repeats the saved macro\nf10 stops the current action",
             justify="left",
             font=("segoe ui", 9),
@@ -153,11 +187,147 @@ class macro_app:
             fg="#4b5563",
         ).pack(anchor="w", pady=(16, 0))
 
+    # build the auto reattack setup and control page
+    def build_auto_page(self, parent):
+        # create the auto reattack controls
+        auto_box = tk.Frame(parent, bg="#e8edf3", padx=14, pady=12)
+        auto_box.pack(fill="x")
+
+        auto_header = tk.Frame(auto_box, bg="#e8edf3")
+        auto_header.pack(fill="x")
+
+        tk.Label(
+            auto_header,
+            text="auto reattack",
+            font=("segoe ui", 10, "bold"),
+            bg="#e8edf3",
+            fg="#111827",
+        ).pack(side="left")
+
+        tk.Label(
+            auto_header,
+            textvariable=self.auto_text,
+            font=("segoe ui", 9, "bold"),
+            bg="#e8edf3",
+            fg="#374151",
+        ).pack(side="right")
+
+        tk.Label(
+            auto_box,
+            textvariable=self.status_text,
+            font=("segoe ui", 9, "bold"),
+            bg="#e8edf3",
+            fg="#111827",
+        ).pack(anchor="w", pady=(10, 0))
+
+        tk.Label(
+            auto_box,
+            textvariable=self.region_text,
+            font=("segoe ui", 9),
+            bg="#e8edf3",
+            fg="#4b5563",
+        ).pack(anchor="w", pady=(8, 0))
+
+        tk.Label(
+            auto_box,
+            textvariable=self.attack_text,
+            font=("segoe ui", 9),
+            bg="#e8edf3",
+            fg="#4b5563",
+        ).pack(anchor="w", pady=(2, 8))
+
+        auto_buttons = tk.Frame(auto_box, bg="#e8edf3")
+        auto_buttons.pack(fill="x")
+
+        self.make_small_button(auto_buttons, "top left  f5", self.set_battle_top_left).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        self.make_small_button(auto_buttons, "bottom right  f6", self.set_battle_bottom_right).pack(side="left", expand=True, fill="x", padx=4)
+        self.make_small_button(auto_buttons, "attack  f7", self.set_attack_point).pack(side="left", expand=True, fill="x", padx=(4, 0))
+
+        interval_header = tk.Frame(auto_box, bg="#e8edf3")
+        interval_header.pack(fill="x", pady=(10, 0))
+
+        tk.Label(
+            interval_header,
+            text="check every",
+            font=("segoe ui", 9, "bold"),
+            bg="#e8edf3",
+            fg="#111827",
+        ).pack(side="left")
+
+        tk.Label(
+            interval_header,
+            textvariable=self.interval_text,
+            font=("segoe ui", 9, "bold"),
+            bg="#e8edf3",
+            fg="#2563eb",
+        ).pack(side="right")
+
+        tk.Scale(
+            auto_box,
+            from_=0.5,
+            to=10.0,
+            resolution=0.5,
+            orient="horizontal",
+            variable=self.interval_value,
+            command=self.update_interval,
+            bg="#e8edf3",
+            fg="#374151",
+            highlightthickness=0,
+            troughcolor="#d1d5db",
+            length=360,
+        ).pack(fill="x", pady=(2, 6))
+
+        self.make_small_button(auto_box, "test red mark", self.test_mark_detection).pack(fill="x", pady=(0, 5))
+        self.make_button(auto_box, "toggle auto reattack", "", self.toggle_auto_attack, "#059669", "#047857")
+
+        # show auto reattack setup hotkeys only on this page
+        tk.Label(
+            parent,
+            text="f5 captures top left\nf6 captures bottom right\nf7 captures fallback attack point",
+            justify="left",
+            font=("segoe ui", 9),
+            bg="#f4f6f8",
+            fg="#4b5563",
+        ).pack(anchor="w", pady=(16, 0))
+
+    # create one tab button
+    def make_tab_button(self, parent, label, command):
+        return tk.Button(
+            parent,
+            text=label,
+            command=command,
+            font=("segoe ui", 10, "bold"),
+            bg="#e8edf3",
+            fg="#374151",
+            activebackground="#dbeafe",
+            activeforeground="#111827",
+            bd=0,
+            relief="flat",
+            height=2,
+            cursor="hand2",
+        )
+
+    # show one page and hide the other
+    def show_page(self, page_name):
+        self.macro_page.pack_forget()
+        self.auto_page.pack_forget()
+
+        if page_name == "macro":
+            self.macro_page.pack(fill="both", expand=True)
+            self.macro_tab_button.configure(bg="#2563eb", fg="white")
+            self.auto_tab_button.configure(bg="#e8edf3", fg="#374151")
+        else:
+            self.auto_page.pack(fill="both", expand=True)
+            self.auto_tab_button.configure(bg="#2563eb", fg="white")
+            self.macro_tab_button.configure(bg="#e8edf3", fg="#374151")
+
     # create one styled button
     def make_button(self, parent, label, hotkey, command, color, active_color):
+        button_text = f"{label}    {hotkey}" if hotkey else label
+
         button = tk.Button(
             parent,
-            text=f"{label}    {hotkey}",
+            text=button_text,
             command=command,
             font=("segoe ui", 10, "bold"),
             bg=color,
@@ -172,19 +342,155 @@ class macro_app:
         button.pack(fill="x", pady=5)
         return button
 
+    # create one compact button for setup actions
+    def make_small_button(self, parent, label, command):
+        return tk.Button(
+            parent,
+            text=label,
+            command=command,
+            font=("segoe ui", 8, "bold"),
+            bg="#ffffff",
+            fg="#111827",
+            activebackground="#f3f4f6",
+            activeforeground="#111827",
+            bd=0,
+            relief="flat",
+            height=2,
+            cursor="hand2",
+        )
+
     # update the playback speed when the slider changes
     def update_speed(self, value):
         self.playback_speed = float(value)
         self.speed_text.set(f"{self.playback_speed:.2f}x")
 
+    # update how often auto reattack checks the battle list
+    def update_interval(self, value):
+        self.check_interval = float(value)
+        self.interval_text.set(f"{self.check_interval:.1f}s")
+
+    # save the current mouse position as the battle-list top left corner
+    def set_battle_top_left(self):
+        self.battle_top_left = pyautogui.position()
+        self.update_battle_region_text()
+
+    # save the current mouse position as the battle-list bottom right corner
+    def set_battle_bottom_right(self):
+        self.battle_bottom_right = pyautogui.position()
+        self.update_battle_region_text()
+
+    # save the current mouse position as the fallback trainer to click
+    def set_attack_point(self):
+        self.attack_point = pyautogui.position()
+        self.attack_text.set(f"attack point: {self.attack_point.x}, {self.attack_point.y}")
+
+    # show the saved battle-list area in the gui
+    def update_battle_region_text(self):
+        if not self.battle_top_left or not self.battle_bottom_right:
+            self.region_text.set("battle area not set")
+            return
+
+        x, y, width, height = self.get_battle_region()
+        self.region_text.set(f"battle area: {x}, {y}, {width}x{height}")
+
+    # convert the two saved corners into a screenshot region
+    def get_battle_region(self):
+        left = min(self.battle_top_left.x, self.battle_bottom_right.x)
+        top = min(self.battle_top_left.y, self.battle_bottom_right.y)
+        right = max(self.battle_top_left.x, self.battle_bottom_right.x)
+        bottom = max(self.battle_top_left.y, self.battle_bottom_right.y)
+        return left, top, right - left, bottom - top
+
+    # turn auto reattack on or off
+    def toggle_auto_attack(self):
+        if self.auto_attack:
+            self.stop_auto_attack_loop()
+            return
+
+        if not self.battle_top_left or not self.battle_bottom_right or not self.attack_point:
+            messagebox.showinfo("setup needed", "set the battle area and attack point first")
+            return
+
+        self.auto_attack = True
+        self.stop_auto_attack.clear()
+        self.auto_text.set("auto reattack on")
+        self.auto_thread = threading.Thread(target=self.run_auto_attack_loop, daemon=True)
+        self.auto_thread.start()
+
+    # stop the auto reattack background loop
+    def stop_auto_attack_loop(self):
+        self.auto_attack = False
+        self.stop_auto_attack.set()
+        self.auto_text.set("auto reattack off")
+
+    # check the battle list repeatedly and click fallback if no red mark exists
+    def run_auto_attack_loop(self):
+        while not self.stop_auto_attack.wait(self.check_interval):
+            if self.recording or self.playing:
+                continue
+
+            try:
+                if not self.trainer_is_marked():
+                    pyautogui.click(self.attack_point.x, self.attack_point.y)
+                    self.root.after(0, lambda: self.status_text.set("auto reattack clicked"))
+            except Exception:
+                self.root.after(0, lambda: self.status_text.set("auto reattack error"))
+
+    # take a screenshot of the battle list and look for the red mark color
+    def trainer_is_marked(self):
+        region = self.get_battle_region()
+        screenshot = pyautogui.screenshot(region=region)
+        return self.has_red_mark(screenshot)
+
+    # detect the red marked trainer pixels from the screenshot
+    def has_red_mark(self, image):
+        red_pixels = 0
+
+        for red, green, blue in image.convert("RGB").getdata():
+            is_red = red >= 150 and green <= 85 and blue <= 85 and red - green >= 70
+
+            if is_red:
+                red_pixels += 1
+
+            if red_pixels >= 12:
+                return True
+
+        return False
+
+    # manually test if the saved battle-list area has a red mark
+    def test_mark_detection(self):
+        if not self.battle_top_left or not self.battle_bottom_right:
+            messagebox.showinfo("setup needed", "set the battle area first")
+            return
+
+        if self.trainer_is_marked():
+            self.status_text.set("red mark found")
+        else:
+            self.status_text.set("no red mark found")
+
     # register global hotkeys so they work outside the app window
     def start_hotkeys(self):
         self.hotkeys = keyboard.GlobalHotKeys({
+            "<f5>": self.safe_set_battle_top_left,
+            "<f6>": self.safe_set_battle_bottom_right,
+            "<f7>": self.safe_set_attack_point,
             "<f8>": self.safe_toggle_recording,
             "<f9>": self.safe_play_recording,
             "<f10>": self.safe_stop_all,
         })
         self.hotkeys.start()
+
+    # send the f5 hotkey action back to the gui thread
+    def safe_set_battle_top_left(self):
+        self.root.after(0, self.set_battle_top_left)
+
+    # send the f6 hotkey action back to the gui thread
+    def safe_set_battle_bottom_right(self):
+        self.root.after(0, self.set_battle_bottom_right)
+
+    # send the f7 hotkey action back to the gui thread
+    def safe_set_attack_point(self):
+        self.root.after(0, self.set_attack_point)
 
     # send the f8 hotkey action back to the gui thread
     def safe_toggle_recording(self):
@@ -345,6 +651,9 @@ class macro_app:
 
     # stop recording or ask playback to stop
     def stop_all(self):
+        if self.auto_attack:
+            self.stop_auto_attack_loop()
+
         if self.recording:
             self.stop_recording()
 
